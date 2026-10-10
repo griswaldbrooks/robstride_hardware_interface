@@ -89,6 +89,9 @@ if(BUILD_TESTING)
   ament_add_gtest(test_deactivate_torque test/test_deactivate_torque.cpp)
   target_include_directories(test_deactivate_torque PRIVATE test)
   target_link_libraries(test_deactivate_torque ${PROJECT_NAME})
+
+  ament_add_gtest(test_fault_bits test/test_fault_bits.cpp)
+  target_link_libraries(test_fault_bits ${PROJECT_NAME})
 endif()
 
 ################################################################################

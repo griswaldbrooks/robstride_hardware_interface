@@ -662,8 +662,7 @@ return_type RobstrideHardware::read(
     hw_state_temperature_[i] = st.temperature.load(std::memory_order_relaxed);
     hw_state_run_state_[i] =
       static_cast<double>(st.run_state.load(std::memory_order_relaxed));
-    hw_state_fault_bits_[i] =
-      static_cast<double>(st.fault_bits.load(std::memory_order_relaxed));
+    hw_state_fault_bits_[i] = static_cast<double>(FaultBits(st));
     any_fault |= st.fault_present.load(std::memory_order_relaxed);
 
     // While untorqued, track the command to the measured position so the
@@ -720,7 +719,7 @@ return_type RobstrideHardware::read(
         st.run_state.load(std::memory_order_relaxed) ==
         static_cast<uint8_t>(robstride_sdk::RunState::MOTOR);
       msg.run_state[i] = st.run_state.load(std::memory_order_relaxed);
-      msg.fault_bits[i] = st.fault_bits.load(std::memory_order_relaxed);
+      msg.fault_bits[i] = FaultBits(st);
     }
     state_pub_uni_ptr_->unlockAndPublish();
   }
@@ -949,7 +948,7 @@ void RobstrideHardware::GetDataCallback(
   } else if (request->item_name == "run_state") {
     response->item_data = static_cast<float>(st.run_state.load());
   } else if (request->item_name == "fault_bits") {
-    response->item_data = static_cast<float>(st.fault_bits.load());
+    response->item_data = static_cast<float>(FaultBits(st));
   } else {
     response->result = false;
     return;

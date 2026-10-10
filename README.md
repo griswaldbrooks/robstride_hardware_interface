@@ -86,7 +86,7 @@ gpio interfaces:
 | `kp`, `kd` | command | Retune gains while running. Same destination as `~/set_data_to_robstride`. |
 | `temperature` | state | Motor temperature (°C) |
 | `run_state` | state | `RunState` enum (`2` = torqued) |
-| `fault_bits` | state | Latched fault word |
+| `fault_bits` | state | Latched fault word, bits as in `robstride_sdk::FaultBit`. The SDK assembles the little-endian 0x15 frame big-endian; the driver swaps it back here, on `~/robstride_state` and in `~/get_data_from_robstride`. |
 
 **The joint's command interface must match its gpio's `control_mode`**: `velocity` mode is driven through `velocity`, `current` through `effort`, and the position modes through `position`. `on_init` rejects any other pairing — a controller claiming an interface the joint's mode never writes would claim it successfully and then achieve nothing, with no error to explain why the joint does not move.
 

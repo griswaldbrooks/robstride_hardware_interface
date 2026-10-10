@@ -36,6 +36,15 @@
 namespace robstride_hardware_interface
 {
 
+// The Type 0x15 fault frame carries its 32-bit fault word little-endian, but
+// robstride_sdk assembles it big-endian, so its fault_bits never line up with
+// robstride_sdk::FaultBit. Swap it back: data 10 40 00 00 is 0x4010 (phase-B
+// overcurrent and stall overload), which the SDK reports as 0x10400000.
+inline uint32_t FaultBits(const robstride_sdk::MotorState & st)
+{
+  return __builtin_bswap32(st.fault_bits.load(std::memory_order_relaxed));
+}
+
 struct JointHandle
 {
   std::string joint_name;
