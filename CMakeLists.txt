@@ -92,6 +92,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_fault_bits test/test_fault_bits.cpp)
   target_link_libraries(test_fault_bits ${PROJECT_NAME})
+
+  ament_add_gtest(test_feedforward test/test_feedforward.cpp)
+  target_link_libraries(test_feedforward ${PROJECT_NAME})
 endif()
 
 ################################################################################
