@@ -118,6 +118,10 @@ private:
   // true: hold the remaining joints and ignore commands when one is lost.
   // false: return ERROR so the whole component is deactivated.
   bool freeze_on_joint_loss_ = true;
+  // true: on_deactivate() leaves torque engaged, so a clean stop holds the
+  // pose instead of dropping the arm. Only actually holds while the motor's
+  // own CAN_TIMEOUT watchdog is disabled; see on_init().
+  bool hold_torque_on_deactivate_ = false;
   // Latched on the first loss, cleared only by a fresh activation.
   bool frozen_ = false;
   // Positions held while frozen, captured at the moment of the loss.

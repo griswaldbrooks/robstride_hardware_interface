@@ -82,6 +82,13 @@ install(PROGRAMS
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_gtest REQUIRED)
+  # Drives the real lifecycle against a fake motor on a virtual CAN interface.
+  # Skips itself when no vcan interface exists; see the test's header comment.
+  ament_add_gtest(test_deactivate_torque test/test_deactivate_torque.cpp)
+  target_include_directories(test_deactivate_torque PRIVATE test)
+  target_link_libraries(test_deactivate_torque ${PROJECT_NAME})
 endif()
 
 ################################################################################

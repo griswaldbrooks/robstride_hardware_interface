@@ -47,9 +47,10 @@ Many gs_usb/candlelight adapters do not support bus-off auto-recovery (`restart-
 | `master_id` | Host CAN id used as the source address of outgoing frames | `253` (`0xFD`) |
 | `number_of_joints` | Optional cross-check against the number of `<joint>` blocks | (unchecked) |
 | `error_timeout_ms` | Time without fresh feedback before a joint counts as lost | `4000` |
-| `motor_can_timeout_ms` | Each motor's own `CAN_TIMEOUT` watchdog (`0x7028`): after this long without a command the motor releases torque. `0` disables it, so when the bus dies a motor keeps holding the last target it received (the freeze hold). Motors that lose power still come back limp. A clean shutdown still disables torque | `error_timeout_ms` |
+| `motor_can_timeout_ms` | Each motor's own `CAN_TIMEOUT` watchdog (`0x7028`): after this long without a command the motor releases torque. `0` disables it, so when the bus dies a motor keeps holding the last target it received (the freeze hold). Motors that lose power still come back limp. A clean shutdown disables torque unless `hold_torque_on_deactivate` says otherwise | `error_timeout_ms` |
 | `freeze_on_joint_loss` | See §6 | `true` |
 | `torque_enable` | Whether activation engages torque. `false` brings the rig up readable but limp: joints report state and can be moved by hand until `~/set_torque` is called | `true` |
+| `hold_torque_on_deactivate` | Whether `on_deactivate()` leaves torque engaged. `false` disables every motor, which drops a gravity-loaded arm wherever it is standing. `true` holds the pose through a clean stop, and then only while `motor_can_timeout_ms` is `0` — an armed motor watchdog releases torque that long after the bus goes quiet, whatever this is set to. `on_init()` warns on that combination | `false` |
 
 ### Joints and gpios
 
@@ -164,6 +165,27 @@ The freeze is latched. A recovered joint stays limp and control is **not** hande
 Setting `freeze_on_joint_loss` to `false` restores the conventional behavior: `read()` returns `ERROR`, the framework deactivates the component, and torque is cut on every joint.
 
 Independently of this, `write()` substitutes a Disable frame for any joint that is stale or reporting a fault, rather than continuing to drive it toward a possibly outdated target. While a joint is untorqued, `read()` tracks its command position to its measured position, so it re-engages targeting where it actually is.
+
+### Deactivation
+
+By default `on_deactivate()` disables every motor. That is right for a rig that can sit
+unpowered, and wrong for an arm that gravity acts on: the joints release wherever they happen to
+be standing and the arm drops onto whatever is below it.
+
+`hold_torque_on_deactivate` makes a clean stop hold the pose instead. Nothing new is commanded
+either way — the motors simply keep the target they were already holding. Two consequences worth
+stating plainly:
+
+- The arm stays **rigid** after the stack stops, until motor power is cut. There is no software
+  path back to limp once the component is gone.
+- It only holds while `motor_can_timeout_ms` is `0`. Deactivation closes the bus, so a motor
+  whose own watchdog is armed releases torque that long afterwards no matter what this setting
+  says. `on_init()` warns when it sees that combination.
+
+A hard kill already behaves this way: the destructor stops and closes the buses without sending
+Disable, so the motors hold until their own watchdog fires. Setting
+`hold_torque_on_deactivate` makes the clean path agree with the crash path rather than
+contradict it.
 
 ### Position after a motor power cycle
 

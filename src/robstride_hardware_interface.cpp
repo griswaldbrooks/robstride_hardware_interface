@@ -121,6 +121,10 @@ CallbackReturn RobstrideHardware::on_init(
       const std::string & v = info_.hardware_parameters.at("torque_enable");
       torque_enabled_desired_.store(v == "true" || v == "True" || v == "1");
     }
+    if (info_.hardware_parameters.count("hold_torque_on_deactivate")) {
+      const std::string & v = info_.hardware_parameters.at("hold_torque_on_deactivate");
+      hold_torque_on_deactivate_ = v == "true" || v == "True" || v == "1";
+    }
   } catch (const std::exception & e) {
     RCLCPP_ERROR_STREAM(
       logger_,
@@ -132,6 +136,17 @@ CallbackReturn RobstrideHardware::on_init(
       logger_,
       "Motor CAN watchdog disabled (motor_can_timeout_ms <= 0): if the bus dies, motors keep "
       "holding their last target until a clean shutdown or a power cut.");
+  }
+  // The two settings are coupled: deactivation closes the bus, so a motor
+  // whose own watchdog is still armed releases torque a short time after the
+  // frames stop regardless of what on_deactivate() chose not to send.
+  if (hold_torque_on_deactivate_ && motor_can_timeout_ms_ > 0.0) {
+    RCLCPP_WARN_STREAM(
+      logger_,
+      "hold_torque_on_deactivate is set but the motor CAN watchdog is armed at " <<
+        motor_can_timeout_ms_ << " ms, so each motor will release torque that long after "
+        "deactivation and the arm will drop. Set motor_can_timeout_ms to 0 to hold the pose "
+        "after a stop.");
   }
 
   const size_t n = info_.joints.size();
@@ -604,10 +619,21 @@ CallbackReturn RobstrideHardware::on_deactivate(
 {
   is_active_ = false;
 
-  for (auto & jh : joints_) {
-    const auto it = buses_.find(jh.can_interface);
-    if (it != buses_.end()) {
-      it->second->SendFrame(jh.motor->EncodeDisable(false));
+  // Disabling torque is the right default for a rig that can rest unpowered,
+  // but it drops a gravity-loaded arm wherever it happens to be standing. With
+  // hold_torque_on_deactivate the motors keep their last target, so a stop
+  // holds the pose; nothing new is commanded either way.
+  if (hold_torque_on_deactivate_) {
+    RCLCPP_WARN(
+      logger_,
+      "Deactivating with torque engaged (hold_torque_on_deactivate=true): the joints stay "
+      "rigid at their current pose. Cut motor power to make the arm limp.");
+  } else {
+    for (auto & jh : joints_) {
+      const auto it = buses_.find(jh.can_interface);
+      if (it != buses_.end()) {
+        it->second->SendFrame(jh.motor->EncodeDisable(false));
+      }
     }
   }
   for (auto & kv : buses_) {
