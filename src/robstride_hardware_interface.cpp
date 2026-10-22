@@ -103,9 +103,20 @@ CallbackReturn RobstrideHardware::on_init(
   try {
     const auto cutoff = info_.hardware_parameters.find("thermal_cutoff_c");
     const auto clear = info_.hardware_parameters.find("thermal_clear_c");
-    thermal_latch_.Configure(
-      cutoff == info_.hardware_parameters.end() ? 0.0 : std::stod(cutoff->second),
-      clear == info_.hardware_parameters.end() ? 75.0 : std::stod(clear->second));
+    const double cutoff_c =
+      cutoff == info_.hardware_parameters.end() ? 0.0 : std::stod(cutoff->second);
+    const double clear_c =
+      clear == info_.hardware_parameters.end() ? 75.0 : std::stod(clear->second);
+    if (std::isfinite(cutoff_c) && std::isfinite(clear_c) &&
+      cutoff_c > 0.0 && clear_c >= cutoff_c)
+    {
+      RCLCPP_ERROR_STREAM(
+        logger_,
+        "thermal_clear_c (75 by default) must be below thermal_cutoff_c (" << cutoff_c <<
+          "); set thermal_clear_c in the hardware parameters to a lower value.");
+      return CallbackReturn::ERROR;
+    }
+    thermal_latch_.Configure(cutoff_c, clear_c);
     if (info_.hardware_parameters.count("master_id")) {
       master_id_ = static_cast<uint8_t>(std::stoi(info_.hardware_parameters.at("master_id")));
     }

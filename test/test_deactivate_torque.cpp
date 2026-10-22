@@ -89,6 +89,27 @@ hardware_interface::HardwareInfo MakeInfo(bool hold_torque_on_deactivate)
   return info;
 }
 
+// Configuration errors must explain the fixed default and the explicit remedy;
+// silently deriving a lower clear threshold would change the safety contract.
+TEST(ThermalConfigurationTest, LowerCutoffsRequireExplicitClearThreshold)
+{
+  for (const std::string cutoff : {"60", "75"}) {
+    SCOPED_TRACE(cutoff);
+    robstride_hardware_interface::RobstrideHardware hardware;
+    hardware_interface::HardwareComponentInterfaceParams params;
+    params.hardware_info = MakeInfo(true);
+    params.hardware_info.hardware_parameters["thermal_cutoff_c"] = cutoff;
+    testing::internal::CaptureStderr();
+    const auto result = hardware.on_init(params);
+    const auto diagnostic = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(result, hardware_interface::CallbackReturn::ERROR);
+    EXPECT_NE(diagnostic.find("thermal_clear_c (75 by default) must be below"), std::string::npos);
+    EXPECT_NE(diagnostic.find("thermal_cutoff_c (" + cutoff + ")"), std::string::npos);
+    EXPECT_NE(diagnostic.find("set thermal_clear_c in the hardware parameters"), std::string::npos);
+    EXPECT_EQ(diagnostic.find("Malformed hardware parameter"), std::string::npos);
+  }
+}
+
 /// Stop frames the motor saw after the last Enable. The activation sequence
 /// sends Stop first as a position probe, so only what follows the Enable can
 /// be the deactivation disabling torque.
@@ -147,6 +168,16 @@ protected:
     return motor.received();
   }
 };
+
+TEST_F(DeactivateTorqueTest, ExplicitLowerClearThresholdIsAccepted)
+{
+  robstride_hardware_interface::RobstrideHardware hardware;
+  hardware_interface::HardwareComponentInterfaceParams params;
+  params.hardware_info = MakeInfo(true);
+  params.hardware_info.hardware_parameters["thermal_cutoff_c"] = "60";
+  params.hardware_info.hardware_parameters["thermal_clear_c"] = "45";
+  EXPECT_EQ(hardware.on_init(params), hardware_interface::CallbackReturn::SUCCESS);
+}
 
 TEST_F(DeactivateTorqueTest, DisablesTorqueByDefault)
 {
