@@ -266,6 +266,15 @@ TEST_F(DeactivateTorqueTest, SevenMotorRestClearPublishesFalseWithoutEnabling)
 
   auto observer = std::make_shared<rclcpp::Node>("thermal_clear_observer");
   bool tripped = false;
+  uint32_t historical_fault = 0;
+  auto motor_subscription =
+    observer->create_subscription<robstride_interfaces::msg::RobstrideState>(
+    "/robstride_hardware_interface/robstride_state", rclcpp::SystemDefaultsQoS(),
+    [&historical_fault](robstride_interfaces::msg::RobstrideState::ConstSharedPtr message) {
+      if (message->fault_bits.size() == 7) {
+        historical_fault = message->fault_bits[5];
+      }
+    });
   auto subscription = observer->create_subscription<std_msgs::msg::Bool>(
     "/robstride_hardware_interface/thermal_tripped",
     rclcpp::QoS(1).reliable().transient_local(),
@@ -334,6 +343,15 @@ TEST_F(DeactivateTorqueTest, SevenMotorRestClearPublishesFalseWithoutEnabling)
   request_clear(robstride_sdk::NowNs() + 5'000'000'000ull);
   cycle(300);
   EXPECT_TRUE(tripped);  // future timestamps cannot authorize clear
+  motors[5]->set_fault(true);
+  cycle(100);
+  request_clear(robstride_sdk::NowNs());
+  cycle(300);
+  EXPECT_TRUE(tripped);  // a current fault still prevents clear
+  ASSERT_EQ(historical_fault, 1u);
+  motors[5]->set_fault(false);
+  cycle(100);
+  ASSERT_EQ(historical_fault, 1u);  // Type-2 health does not erase fault history
   std::vector<size_t> enables;
   for (auto & motor : motors) {
     const auto frames = motor->received();

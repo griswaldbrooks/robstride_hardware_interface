@@ -1083,8 +1083,8 @@ void RobstrideHardware::UpdateThermalLatch()
       state.temperature.load(std::memory_order_relaxed), stamp,
       state.run_state.load(std::memory_order_relaxed) ==
       static_cast<uint8_t>(robstride_sdk::RunState::RESET),
-      !state.fault_present.load(std::memory_order_relaxed) &&
-      state.fault_bits.load(std::memory_order_relaxed) == 0};
+      // Type-2 refreshes current health; detailed fault_bits retain history.
+      !state.fault_present.load(std::memory_order_relaxed)};
   }
   if (thermal_latch_.TryClear(thermal_samples_, now_ns)) {
     RCLCPP_INFO(logger_,
