@@ -5,6 +5,7 @@
 #define FAKE_ROBSTRIDE_MOTOR_HPP_
 
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -82,6 +83,7 @@ public:
   /// Position the fake reports, in rad.
   void set_position(double position) {position_ = position;}
   void set_temperature(double temperature) {temperature_ = temperature;}
+  void set_silent(bool silent) {silent_ = silent;}
 
 private:
   void Run()
@@ -108,7 +110,13 @@ private:
       } else if (parsed.comm_type == robstride_sdk::COMM_MOTOR_STOP) {
         enabled_ = false;
       }
-      SendFeedback();
+      if (!silent_) {
+        // Model wire/firmware latency: activation records its probe start
+        // after queuing the Stop burst. An instantaneous vcan reply can
+        // otherwise precede that timestamp, especially with seven motors.
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        SendFeedback();
+      }
     }
   }
 
@@ -154,6 +162,7 @@ private:
   int socket_ = -1;
   std::atomic<bool> running_{false};
   std::atomic<bool> enabled_{false};
+  std::atomic<bool> silent_{false};
   std::atomic<double> position_{0.0};
   std::atomic<double> temperature_{25.0};
   std::thread thread_;

@@ -235,6 +235,121 @@ TEST_F(DeactivateTorqueTest, HotInitialFeedbackPreventsDefaultStartupEnable)
   hardware.on_deactivate(state);
 }
 
+TEST_F(DeactivateTorqueTest, SevenMotorRestClearPublishesFalseWithoutEnabling)
+{
+  std::vector<std::unique_ptr<FakeRobstrideMotor>> motors;
+  auto info = MakeInfo(true);
+  const auto joint_template = info.joints.front();
+  const auto gpio_template = info.gpios.front();
+  info.joints.clear();
+  info.gpios.clear();
+  for (uint8_t id = 1; id <= 7; ++id) {
+    auto joint = joint_template;
+    joint.name = "test_joint" + std::to_string(id);
+    joint.parameters["id"] = std::to_string(id);
+    info.joints.push_back(joint);
+    auto gpio = gpio_template;
+    gpio.name = "test_motor" + std::to_string(id);
+    gpio.parameters["ID"] = std::to_string(id);
+    info.gpios.push_back(gpio);
+    motors.push_back(std::make_unique<FakeRobstrideMotor>(TestInterface(), id, kMasterId));
+    ASSERT_TRUE(motors.back()->ok());
+  }
+  info.hardware_parameters["thermal_cutoff_c"] = "100";
+  info.hardware_parameters["thermal_clear_c"] = "75";
+  auto hardware = std::make_shared<robstride_hardware_interface::RobstrideHardware>();
+  hardware_interface::HardwareComponentInterfaceParams params;
+  params.hardware_info = info;
+  ASSERT_EQ(hardware->on_init(params), hardware_interface::CallbackReturn::SUCCESS);
+  const rclcpp_lifecycle::State state;
+  ASSERT_EQ(hardware->on_activate(state), hardware_interface::CallbackReturn::SUCCESS);
+
+  auto observer = std::make_shared<rclcpp::Node>("thermal_clear_observer");
+  bool tripped = false;
+  auto subscription = observer->create_subscription<std_msgs::msg::Bool>(
+    "/robstride_hardware_interface/thermal_tripped",
+    rclcpp::QoS(1).reliable().transient_local(),
+    [&tripped](std_msgs::msg::Bool::ConstSharedPtr message) {tripped = message->data;});
+  const auto period = rclcpp::Duration::from_seconds(0.01);
+  auto cycle = [&](int milliseconds) {
+      const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(milliseconds);
+      while (std::chrono::steady_clock::now() < deadline) {
+        hardware->write(hardware->now(), period);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        hardware->read(hardware->now(), period);
+        rclcpp::spin_some(observer);
+      }
+    };
+  auto torque = observer->create_client<std_srvs::srv::SetBool>(
+    "/robstride_hardware_interface/set_torque");
+  auto clear = observer->create_publisher<std_msgs::msg::UInt64>(
+    "/robstride_hardware_interface/thermal_rest_verified", 1);
+  ASSERT_TRUE(torque->wait_for_service(std::chrono::seconds(2)));
+  auto request_clear = [&](uint64_t stamp) {
+      std_msgs::msg::UInt64 message;
+      message.data = stamp;
+      clear->publish(message);
+      // Let the driver's private executor consume the attestation before read.
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    };
+  auto set_torque = [&](bool enabled) {
+      auto request = std::make_shared<std_srvs::srv::SetBool::Request>();
+      request->data = enabled;
+      auto pending = torque->async_send_request(request);
+      EXPECT_EQ(rclcpp::spin_until_future_complete(observer, pending, std::chrono::seconds(2)),
+        rclcpp::FutureReturnCode::SUCCESS);
+      return pending.get()->success;
+    };
+  motors[6]->set_temperature(100.0);
+  cycle(300);
+  ASSERT_TRUE(tripped);
+  EXPECT_FALSE(set_torque(true));
+  for (auto & motor : motors) {
+    motor->set_temperature(74.9);
+  }
+  cycle(100);
+  request_clear(robstride_sdk::NowNs());
+  cycle(300);
+  EXPECT_TRUE(tripped);  // cool but still enabled
+  ASSERT_TRUE(set_torque(false));
+  motors[6]->set_temperature(75.0);
+  cycle(100);
+  request_clear(robstride_sdk::NowNs());
+  cycle(300);
+  EXPECT_TRUE(tripped);  // strict boundary, including the seventh motor
+  motors[6]->set_temperature(74.9);
+  cycle(100);
+  motors[6]->set_silent(true);
+  cycle(600);
+  request_clear(robstride_sdk::NowNs());
+  cycle(300);
+  EXPECT_TRUE(tripped);  // old cool feedback is insufficient
+  motors[6]->set_silent(false);
+  cycle(100);
+  EXPECT_TRUE(tripped);  // new feedback alone does not clear
+  request_clear(robstride_sdk::NowNs() - 100'000'000ull);
+  cycle(300);
+  EXPECT_TRUE(tripped);  // delayed HOME verification is not fresh
+  request_clear(robstride_sdk::NowNs() + 5'000'000'000ull);
+  cycle(300);
+  EXPECT_TRUE(tripped);  // future timestamps cannot authorize clear
+  std::vector<size_t> enables;
+  for (auto & motor : motors) {
+    const auto frames = motor->received();
+    enables.push_back(std::count(frames.begin(), frames.end(), robstride_sdk::COMM_MOTOR_ENABLE));
+  }
+  request_clear(robstride_sdk::NowNs());
+  cycle(300);
+  EXPECT_FALSE(tripped);
+  for (size_t i = 0; i < motors.size(); ++i) {
+    const auto frames = motors[i]->received();
+    EXPECT_EQ(std::count(frames.begin(), frames.end(), robstride_sdk::COMM_MOTOR_ENABLE),
+        enables[i]);
+  }
+  ASSERT_EQ(hardware->on_deactivate(state), hardware_interface::CallbackReturn::SUCCESS);
+}
+
 }  // namespace
 
 int main(int argc, char ** argv)
